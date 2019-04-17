@@ -1,8 +1,12 @@
 package moze_intel.projecte.emc.mappers.customConversions;
 
+import com.google.common.collect.ImmutableList;
+import com.google.common.collect.Maps;
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import moze_intel.projecte.PECore;
-import moze_intel.projecte.emc.collector.IMappingCollector;
 import moze_intel.projecte.emc.NormalizedSimpleStack;
+import moze_intel.projecte.emc.collector.IMappingCollector;
 import moze_intel.projecte.emc.mappers.IEMCMapper;
 import moze_intel.projecte.emc.mappers.customConversions.json.ConversionGroup;
 import moze_intel.projecte.emc.mappers.customConversions.json.CustomConversion;
@@ -11,11 +15,6 @@ import moze_intel.projecte.emc.mappers.customConversions.json.CustomConversionFi
 import moze_intel.projecte.emc.mappers.customConversions.json.FixedValues;
 import moze_intel.projecte.emc.mappers.customConversions.json.FixedValuesDeserializer;
 import moze_intel.projecte.utils.PELogger;
-
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Maps;
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
 import net.minecraft.item.ItemStack;
 import net.minecraftforge.common.config.Configuration;
 import net.minecraftforge.fluids.Fluid;
@@ -23,18 +22,24 @@ import net.minecraftforge.fluids.FluidRegistry;
 import net.minecraftforge.oredict.OreDictionary;
 import org.apache.commons.io.IOUtils;
 
+import java.io.BufferedOutputStream;
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileReader;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.Reader;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 
 public class CustomConversionMapper implements IEMCMapper<NormalizedSimpleStack, Integer>
 {
-	public static final ImmutableList<String> defaultfilenames = ImmutableList.of("metals", "example", "ODdefaults");
-
+	private static final String EXAMPLE_FILENAME = "example";
+	private static final ImmutableList<String> defaultFilenames = ImmutableList.of("defaults", "ODdefaults", "metals");
 
 	@Override
 	public String getName()
@@ -45,7 +50,7 @@ public class CustomConversionMapper implements IEMCMapper<NormalizedSimpleStack,
 	@Override
 	public String getDescription()
 	{
-		return "";
+		return "Uses json files within config/ProjectE/customConversions/ to add values and conversions";
 	}
 
 	@Override
@@ -63,42 +68,60 @@ public class CustomConversionMapper implements IEMCMapper<NormalizedSimpleStack,
 			{
 				tryToWriteDefaultFiles();
 			}
-			for (File f: customConversionFolder.listFiles()) {
-				if (f.isFile() && f.canRead()) {
-					if (f.getName().toLowerCase().endsWith(".json")) {
-						if (config.getBoolean(f.getName().substring(0, f.getName().length() - 5), "", true, String.format("Read file: %s?", f.getName()))) {
-							try
-							{
-								addMappingsFromFile(new FileReader(f), mapper);
-								PELogger.logInfo("Collected Mappings from " + f.getName());
-							} catch (Exception e) {
-								PELogger.logFatal("Exception when reading file: " + f);
-								e.printStackTrace();
-							}
-						}
-					}
-				}
+
+			for (String defaultFile : defaultFilenames)
+			{
+				readFile(new File(customConversionFolder, defaultFile + ".json"), config, mapper, true);
+			}
+
+			List<File> sortedFiles = Arrays.asList(customConversionFolder.listFiles());
+			Collections.sort(sortedFiles);
+
+			for (File f : sortedFiles)
+			{
+				readFile(f, config, mapper, false);
 			}
 		} else {
 			PELogger.logFatal("COULD NOT CREATE customConversions FOLDER IN config/ProjectE");
 		}
 	}
 
-	public static File getCustomConversionFolder()
+	private static void readFile(File f, Configuration config, IMappingCollector<NormalizedSimpleStack, Integer> mapper, boolean allowDefaults)
+	{
+		if (f.isFile() && f.canRead() && f.getName().toLowerCase().endsWith(".json")) {
+			String name = f.getName().substring(0, f.getName().length() - ".json".length());
+
+			if (!EXAMPLE_FILENAME.equals(name)
+					&& (allowDefaults || !defaultFilenames.contains(name))
+					&& config.getBoolean(name, "", true, String.format("Read file: %s?", f.getName()))) {
+				try
+				{
+					addMappingsFromFile(new FileReader(f), mapper);
+					PELogger.logInfo("Collected Mappings from " + f.getName());
+				} catch (Exception e) {
+					PELogger.logFatal("Exception when reading file: " + f);
+					e.printStackTrace();
+				}
+			}
+		}
+
+	}
+
+	private static File getCustomConversionFolder()
 	{
 		return new File(PECore.CONFIG_DIR, "customConversions");
 	}
 
-	public static void addMappingsFromFile(Reader json, IMappingCollector<NormalizedSimpleStack, Integer> mapper) {
+	private static void addMappingsFromFile(Reader json, IMappingCollector<NormalizedSimpleStack, Integer> mapper) {
 		addMappingsFromFile(parseJson(json), mapper);
 	}
 
-	public static void addMappingsFromFile(CustomConversionFile file, IMappingCollector<NormalizedSimpleStack, Integer> mapper) {
+	private static void addMappingsFromFile(CustomConversionFile file, IMappingCollector<NormalizedSimpleStack, Integer> mapper) {
 		Map<String, NormalizedSimpleStack> fakes = Maps.newHashMap();
 		//TODO implement buffered IMappingCollector to recover from failures
 		for (Map.Entry<String, ConversionGroup> entry : file.groups.entrySet())
 		{
-			PELogger.logDebug(String.format("Adding conversions from group '%s' with comment '%s'", entry.getKey(), entry.getValue().comment));
+			PELogger.logInfo(String.format("Adding conversions from group '%s' with comment '%s'", entry.getKey(), entry.getValue().comment));
 			try
 			{
 				for (CustomConversion conversion : entry.getValue().conversions)
@@ -171,7 +194,7 @@ public class CustomConversionMapper implements IEMCMapper<NormalizedSimpleStack,
 	}
 
 
-	private static NormalizedSimpleStack getNSSfromJsonString(String s, Map<String, NormalizedSimpleStack> fakes) throws Exception
+	public static NormalizedSimpleStack getNSSfromJsonString(String s, Map<String, NormalizedSimpleStack> fakes)
 	{
 		if (s.startsWith("OD|")) {
 			return NormalizedSimpleStack.forOreDictionary(s.substring(3));
@@ -212,32 +235,37 @@ public class CustomConversionMapper implements IEMCMapper<NormalizedSimpleStack,
 		builder.registerTypeAdapter(CustomConversion.class, new CustomConversionDeserializer());
 		builder.registerTypeAdapter(FixedValues.class, new FixedValuesDeserializer());
 		Gson gson = builder.create();
-		return gson.fromJson(json, CustomConversionFile.class);
+		return gson.fromJson(new BufferedReader(json), CustomConversionFile.class);
 	}
 
 
-	public static void tryToWriteDefaultFiles() {
-		for (String filename: defaultfilenames) {
+	private static void tryToWriteDefaultFiles() {
+		writeDefaultFile(EXAMPLE_FILENAME);
+
+		for (String filename : defaultFilenames) {
 			writeDefaultFile(filename);
 		}
 	}
 
 	private static void writeDefaultFile(String filename) {
-		File customConversionFolder = getCustomConversionFolder();
-		File f = new File(customConversionFolder, filename + ".json");
+		File f = new File(getCustomConversionFolder(), filename + ".json");
+
 		if (f.exists()) {
-			return;
+			f.delete();
 		}
-		try {
-		if (f.createNewFile() && f.canWrite())
+
+		try
 		{
-			InputStream stream = CustomConversionMapper.class.getClassLoader().getResourceAsStream("defaultCustomConversions/" + filename + ".json");
-			OutputStream outputStream = new FileOutputStream(f);
-			IOUtils.copy(stream, outputStream);
-			stream.close();
-			outputStream.close();
-		}
-		} catch (Exception e) {
+			if (f.createNewFile() && f.canWrite())
+			{
+				String path = "defaultCustomConversions/" + filename + ".json";
+				try (InputStream stream = CustomConversionMapper.class.getClassLoader().getResourceAsStream(path);
+					 OutputStream outputStream = new BufferedOutputStream(new FileOutputStream(f)))
+				{
+					IOUtils.copy(stream, outputStream);
+				}
+			}
+		} catch (IOException e) {
 			e.printStackTrace();
 		}
 

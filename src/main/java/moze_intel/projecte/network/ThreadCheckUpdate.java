@@ -5,10 +5,11 @@ import moze_intel.projecte.PECore;
 import moze_intel.projecte.network.commands.ChangelogCMD;
 import moze_intel.projecte.utils.PELogger;
 import net.minecraft.client.Minecraft;
-import net.minecraft.event.ClickEvent;
-import net.minecraft.util.ChatComponentText;
-import net.minecraft.util.IChatComponent;
-import net.minecraft.util.StatCollector;
+import net.minecraft.client.resources.I18n;
+import net.minecraft.util.text.ITextComponent;
+import net.minecraft.util.text.TextComponentString;
+import net.minecraft.util.text.event.ClickEvent;
+import org.apache.commons.io.IOUtils;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -21,11 +22,9 @@ public class ThreadCheckUpdate extends Thread
 {
 	private static boolean hasRunServer = false;
 	private static boolean hasRunClient = false;
-	private final String changelogURL = "https://raw.githubusercontent.com/sinkillerj/ProjectE/master/Changelog.txt";
-	private final String changelogDevURL = "https://raw.githubusercontent.com/sinkillerj/ProjectE/master/ChangelogDev.txt";
-	private final String githubURL = "https://github.com/sinkillerj/ProjectE";
-	private final String curseURL = "http://minecraft.curseforge.com/mc-mods/226410-projecte/files";
-	private boolean isServerSide;
+	private static final String changelogURL = "https://raw.githubusercontent.com/sinkillerj/ProjectE/master/ChangelogMC110.txt";
+	private static final String curseURL = "http://minecraft.curseforge.com/mc-mods/226410-projecte/files";
+	private final boolean isServerSide;
 	
 	public ThreadCheckUpdate(boolean isServer) 
 	{
@@ -90,14 +89,14 @@ public class ThreadCheckUpdate extends Thread
 				}
 				else
 				{
-					Minecraft.getMinecraft().thePlayer.addChatMessage(new ChatComponentText(String.format(StatCollector.translateToLocal("pe.update.available"), latestVersion)));
-					Minecraft.getMinecraft().thePlayer.addChatMessage(new ChatComponentText(StatCollector.translateToLocal("pe.update.getit")));
+					Minecraft.getMinecraft().thePlayer.addChatMessage(new TextComponentString(I18n.format("pe.update.available", latestVersion)));
+					Minecraft.getMinecraft().thePlayer.addChatMessage(new TextComponentString(I18n.format("pe.update.getit")));
 
-					IChatComponent link = new ChatComponentText(curseURL);
-					link.getChatStyle().setChatClickEvent(new ClickEvent(ClickEvent.Action.OPEN_URL, curseURL));
+					ITextComponent link = new TextComponentString(curseURL);
+					link.getStyle().setClickEvent(new ClickEvent(ClickEvent.Action.OPEN_URL, curseURL));
 					Minecraft.getMinecraft().thePlayer.addChatMessage(link);
 
-					Minecraft.getMinecraft().thePlayer.addChatMessage(new ChatComponentText(StatCollector.translateToLocal("pe.update.changelog")));
+					Minecraft.getMinecraft().thePlayer.addChatMessage(new TextComponentString(I18n.format("pe.update.changelog")));
 				}
 			}
 			else
@@ -112,19 +111,8 @@ public class ThreadCheckUpdate extends Thread
 		}
 		finally
 		{
-			if (reader != null)
-			{
-				try 
-				{
-					reader.close();
-				} 
-				catch (IOException e) 
-				{
-					PELogger.logFatal("Caught exception in Update Checker thread!");
-					e.printStackTrace();
-				}
-			}
-			
+			IOUtils.closeQuietly(reader);
+
 			if (connection != null)
 			{
 				connection.disconnect();
